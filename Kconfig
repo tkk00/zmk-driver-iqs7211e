@@ -15,6 +15,17 @@ config IQS7211E_TAP_EDGE_MARGIN_PERMILLE
       Edge margin used to suppress tap/click detection in scroller mode.
       80 means 8 percent margin from each edge.
 
+config IQS7211E_TAP_DRAG_WINDOW_MS
+    int "Tap-to-drag window (ms)"
+    range 100 1000
+    default 300
+    help
+      After a quick tap, if the finger is placed back down within this window,
+      a tap-to-drag begins (button held while the finger stays down, released
+      when the finger lifts). Similar to the standard touchpad tap-drag gesture.
+      Larger values make it easier to trigger a drag but may cause an
+      unintended drag when double-clicking quickly.
+
 config IQS7211E_SCROLLER_HWHEEL_ZONE_MIN_PERMILLE
     int "HWheel zone start (permille)"
     range 0 1000
