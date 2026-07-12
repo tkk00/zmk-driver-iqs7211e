@@ -818,14 +818,8 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 iqs7211e_process_scroller_motion(data, cfg, hwheel_zone, x_movement, y_movement,
                                                 current_time);
             } else {
-                if (abs(y_movement) > 0) {
-                    LOG_DBG("Scroll Y: %d", -y_movement);
-                    input_report_rel(dev, INPUT_REL_WHEEL, -y_movement, true, K_FOREVER);
-                }
-                if (abs(x_movement) > 0) {
-                    LOG_DBG("Scroll X: %d", x_movement);
-                    input_report_rel(dev, INPUT_REL_HWHEEL, x_movement, true, K_FOREVER);
-                }
+                iqs7211e_report_scroll(data, INPUT_REL_WHEEL, -y_movement, current_time);
+                iqs7211e_report_scroll(data, INPUT_REL_HWHEEL, x_movement, current_time);
             }
         }
         
@@ -898,7 +892,7 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
         }
 
 #if defined(CONFIG_IQS7211E_SCROLLER_INERTIA) && CONFIG_IQS7211E_SCROLLER_INERTIA
-        if (cfg->scroller_mode && data->scroll_was_active) {
+        if (data->scroll_was_active) {
             iqs7211e_start_inertia_scroll(data);
         }
 #endif
