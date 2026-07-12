@@ -43,11 +43,13 @@ config IQS7211E_SCROLLER_HWHEEL_ZONE_MAX_PERMILLE
       This value and MIN define a band [MIN, MAX).
 
 config IQS7211E_SCROLLER_INERTIA
-    bool "Enable inertia scrolling in scroller mode"
+    bool "Enable inertia scrolling"
     default n
     help
-      Keep sending wheel events after finger release when the device is in
-      scroller mode. Uses fixed-point integer math (no FPU required).
+      Keep sending wheel events after finger release, decaying over time,
+      so two-finger scrolling has momentum. Works with both the default
+      two-finger scroll and scroller mode. Uses fixed-point integer math
+      (no FPU required).
 
 config IQS7211E_SCROLLER_INERTIA_DECAY_PERMILLE
     int "Inertia decay coefficient (permille)"
