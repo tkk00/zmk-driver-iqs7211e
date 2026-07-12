@@ -26,6 +26,50 @@ config IQS7211E_TAP_DRAG_WINDOW_MS
       Larger values make it easier to trigger a drag but may cause an
       unintended drag when double-clicking quickly.
 
+choice
+    prompt "Two-finger horizontal gesture mode"
+    default IQS7211E_HORIZONTAL_SCROLL
+    help
+      Selects what a horizontal two-finger movement does. Scroll sends
+      horizontal wheel events; Navigation fires browser back/forward
+      (mouse buttons 4/5) once per swipe. Vertical scrolling keeps
+      working in both modes.
+
+config IQS7211E_HORIZONTAL_SCROLL
+    bool "Horizontal scroll"
+
+config IQS7211E_HORIZONTAL_NAVIGATION
+    bool "Browser back/forward navigation"
+
+endchoice
+
+config IQS7211E_NAVIGATION_THRESHOLD
+    int "Navigation swipe distance threshold"
+    depends on IQS7211E_HORIZONTAL_NAVIGATION
+    range 20 2000
+    default 200
+    help
+      Accumulated horizontal movement (in raw sensor units) required to
+      trigger a back/forward action. Fires at most once per two-finger
+      touch. Larger values require a longer, more deliberate swipe.
+
+config IQS7211E_NAVIGATION_USE_Y_AXIS
+    bool "Use raw Y axis for navigation swipe"
+    depends on IQS7211E_HORIZONTAL_NAVIGATION
+    default n
+    help
+      Enable this when the trackpad is physically mounted rotated 90
+      degrees (i.e. your ZMK config uses INPUT_TRANSFORM_XY_SWAP), so
+      the user-horizontal direction corresponds to the sensor's raw Y
+      axis. The remaining raw axis keeps scrolling vertically.
+
+config IQS7211E_NAVIGATION_INVERT
+    bool "Invert navigation swipe direction"
+    depends on IQS7211E_HORIZONTAL_NAVIGATION
+    default n
+    help
+      Swap which swipe direction means back vs forward.
+
 config IQS7211E_SCROLLER_HWHEEL_ZONE_MIN_PERMILLE
     int "HWheel zone start (permille)"
     range 0 1000
