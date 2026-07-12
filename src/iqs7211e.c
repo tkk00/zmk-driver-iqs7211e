@@ -65,6 +65,8 @@ struct iqs7211e_data {
     bool double_tap_hold;
     bool tap_pending;   // waiting for a second touch to start a tap-to-drag
     bool drag_active;   // finger is down and holding a drag (button pressed)
+    int32_t nav_accum;  // accumulated horizontal movement for navigation swipe
+    bool nav_triggered; // navigation already fired during this two-finger touch
     uint8_t tap_count;
     int16_t tap_start_x, tap_start_y;
     int16_t finger_2_prev_x, finger_2_prev_y;
@@ -644,6 +646,14 @@ static void iqs7211e_click_work_handler(struct k_work *work) {
         // Right click release
         LOG_DBG("Two finger tap - release");
         input_report_key(dev, INPUT_BTN_1, 0, true, K_FOREVER);
+    } else if (data->pending_click_type == 3) {
+        // Navigation back release
+        LOG_DBG("Nav back - release");
+        input_report_key(dev, INPUT_BTN_3, 0, true, K_FOREVER);
+    } else if (data->pending_click_type == 4) {
+        // Navigation forward release
+        LOG_DBG("Nav forward - release");
+        input_report_key(dev, INPUT_BTN_4, 0, true, K_FOREVER);
     }
     data->pending_click_type = 0;
 }
@@ -794,6 +804,8 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
             // Two finger touch start
             data->last_touch_time = current_time;
             data->scroll_was_active = false;
+            data->nav_accum = 0;
+            data->nav_triggered = false;
             data->gesture_started_near_edge = iqs7211e_is_near_edge(data, finger_1_x, finger_1_y) ||
                                               iqs7211e_is_near_edge(data, finger_2_x, finger_2_y);
             data->scroller_axis_lock = IQS7211E_SCROLL_AXIS_NONE;
@@ -818,8 +830,45 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 iqs7211e_process_scroller_motion(data, cfg, hwheel_zone, x_movement, y_movement,
                                                 current_time);
             } else {
+#if defined(CONFIG_IQS7211E_HORIZONTAL_NAVIGATION)
+                // Navigation mode: the user-horizontal axis triggers browser
+                // back/forward (mouse button 4/5); the other axis still scrolls.
+                int16_t nav_delta;
+                int16_t wheel_delta = 0;
+                int16_t hwheel_delta = 0;
+
+#if defined(CONFIG_IQS7211E_NAVIGATION_USE_Y_AXIS)
+                nav_delta = y_movement;
+                hwheel_delta = x_movement;
+#else
+                nav_delta = x_movement;
+                wheel_delta = -y_movement;
+#endif
+#if defined(CONFIG_IQS7211E_NAVIGATION_INVERT)
+                nav_delta = -nav_delta;
+#endif
+                data->nav_accum += nav_delta;
+                if (!data->nav_triggered &&
+                    (data->nav_accum > CONFIG_IQS7211E_NAVIGATION_THRESHOLD ||
+                     data->nav_accum < -CONFIG_IQS7211E_NAVIGATION_THRESHOLD)) {
+                    if (data->nav_accum > 0) {
+                        LOG_DBG("Nav forward - press");
+                        input_report_key(dev, INPUT_BTN_4, 1, true, K_FOREVER);
+                        data->pending_click_type = 4;
+                    } else {
+                        LOG_DBG("Nav back - press");
+                        input_report_key(dev, INPUT_BTN_3, 1, true, K_FOREVER);
+                        data->pending_click_type = 3;
+                    }
+                    k_work_schedule(&data->click_work, K_MSEC(50));
+                    data->nav_triggered = true;
+                }
+                iqs7211e_report_scroll(data, INPUT_REL_WHEEL, wheel_delta, current_time);
+                iqs7211e_report_scroll(data, INPUT_REL_HWHEEL, hwheel_delta, current_time);
+#else
                 iqs7211e_report_scroll(data, INPUT_REL_WHEEL, -y_movement, current_time);
                 iqs7211e_report_scroll(data, INPUT_REL_HWHEEL, x_movement, current_time);
+#endif
             }
         }
         
