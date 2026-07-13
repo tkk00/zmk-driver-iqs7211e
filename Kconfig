@@ -1,4 +1,3 @@
-
 menuconfig IQS7211E
     bool "IQS7211E capcacitive touch sensor"
   select I2C
@@ -26,22 +25,15 @@ config IQS7211E_TAP_DRAG_WINDOW_MS
       Larger values make it easier to trigger a drag but may cause an
       unintended drag when double-clicking quickly.
 
-choice
-    prompt "Two-finger horizontal gesture mode"
-    default IQS7211E_HORIZONTAL_SCROLL
-    help
-      Selects what a horizontal two-finger movement does. Scroll sends
-      horizontal wheel events; Navigation fires browser back/forward
-      (mouse buttons 4/5) once per swipe. Vertical scrolling keeps
-      working in both modes.
-
-config IQS7211E_HORIZONTAL_SCROLL
-    bool "Horizontal scroll"
-
 config IQS7211E_HORIZONTAL_NAVIGATION
-    bool "Browser back/forward navigation"
-
-endchoice
+    bool "Two-finger horizontal swipe triggers browser back/forward"
+    default n
+    help
+      When enabled, a horizontal two-finger swipe fires browser
+      back/forward (mouse buttons 4/5) once per touch instead of
+      horizontal scrolling. Vertical scrolling keeps working.
+      When disabled (default), horizontal two-finger movement scrolls
+      horizontally as usual.
 
 config IQS7211E_NAVIGATION_THRESHOLD
     int "Navigation swipe distance threshold"
