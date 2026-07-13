@@ -1,3 +1,4 @@
+
 menuconfig IQS7211E
     bool "IQS7211E capcacitive touch sensor"
   select I2C
@@ -61,6 +62,47 @@ config IQS7211E_NAVIGATION_INVERT
     default n
     help
       Swap which swipe direction means back vs forward.
+
+config IQS7211E_TWO_FINGER_GRACE_MS
+    int "Two-finger detection grace period (ms)"
+    range 0 500
+    default 100
+    help
+      The sensor's two-finger detection can flicker (2 -> 1 -> 2 fingers)
+      mid-gesture. Within this window a lost second finger does not end the
+      two-finger session: scrolling state, navigation accumulation and
+      gesture decisions are kept, and single-finger cursor movement is
+      suppressed. Larger values are more forgiving but delay the switch
+      back to cursor movement after a real finger lift.
+
+config IQS7211E_PINCH_ZOOM
+    bool "Two-finger pinch zoom"
+    default n
+    help
+      Detect pinch (fingers moving apart or together) and emit zoom steps
+      as synthetic button events (BTN_FORWARD for zoom in, BTN_BACK for
+      zoom out). Map them to key presses with a
+      zmk,input-processor-behaviors node on the central's input listener,
+      e.g. Ctrl+KP_PLUS / Ctrl+KP_MINUS for browser zoom.
+
+config IQS7211E_PINCH_STEP
+    int "Pinch distance per zoom step"
+    depends on IQS7211E_PINCH_ZOOM
+    range 20 500
+    default 80
+    help
+      Inter-finger distance change (raw sensor units) required for one
+      zoom step. Smaller values zoom faster.
+
+config IQS7211E_GESTURE_DECIDE_THRESHOLD
+    int "Scroll vs pinch decision threshold"
+    depends on IQS7211E_PINCH_ZOOM
+    range 10 300
+    default 60
+    help
+      Accumulated evidence required to lock a two-finger gesture as either
+      scroll or pinch. Until decided, movement scrolls as usual. Smaller
+      values decide faster but may misclassify.
 
 config IQS7211E_SCROLLER_HWHEEL_ZONE_MIN_PERMILLE
     int "HWheel zone start (permille)"
