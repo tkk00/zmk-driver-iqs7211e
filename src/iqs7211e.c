@@ -93,6 +93,7 @@ struct iqs7211e_data {
     int64_t inertia_last_wheel_time;
     int64_t inertia_last_hwheel_time;
     bool inertia_running;
+    int64_t inertia_start_time;
 #endif
 };
 
@@ -224,6 +225,14 @@ static void iqs7211e_update_inertia_velocity(struct iqs7211e_data *data, uint16_
 
     // A light moving-average filter prevents abrupt speed jumps.
     *velocity_q8 = (*velocity_q8 * 3 + sample_q8) / 4;
+
+    // Hard cap so inertia can never start absurdly fast (also guards the
+    // decay multiplication against any overflow-driven runaway).
+    if (*velocity_q8 > 20 * IQS7211E_Q8_ONE) {
+        *velocity_q8 = 20 * IQS7211E_Q8_ONE;
+    } else if (*velocity_q8 < -20 * IQS7211E_Q8_ONE) {
+        *velocity_q8 = -20 * IQS7211E_Q8_ONE;
+    }
     *last_time = current_time;
 }
 
@@ -237,6 +246,13 @@ static void iqs7211e_inertia_work_handler(struct k_work *work) {
     bool hwheel_active;
 
     if (!data->inertia_running) {
+        return;
+    }
+
+    // Absolute safety limit: never coast for more than 1.5 seconds,
+    // regardless of velocity state.
+    if ((k_uptime_get() - data->inertia_start_time) > 1500) {
+        iqs7211e_stop_inertia_scroll(data);
         return;
     }
 
@@ -310,6 +326,7 @@ static void iqs7211e_start_inertia_scroll(struct iqs7211e_data *data) {
     }
 
     data->inertia_running = true;
+    data->inertia_start_time = k_uptime_get();
     (void)k_work_schedule(&data->inertia_work, K_MSEC(IQS7211E_INERTIA_TICK_MS));
 }
 #endif
@@ -334,6 +351,13 @@ static void iqs7211e_send_zoom(const struct device *dev, bool zoom_in) {
 
 static void iqs7211e_report_scroll(struct iqs7211e_data *data, uint16_t axis,
                                    int16_t wheel_delta, int64_t current_time) {
+    // Clamp implausible per-frame deltas (coordinate jumps) so they can
+    // neither flood the event pipeline nor seed a huge inertia velocity.
+    if (wheel_delta > 40) {
+        wheel_delta = 40;
+    } else if (wheel_delta < -40) {
+        wheel_delta = -40;
+    }
     if (wheel_delta == 0) {
         return;
     }
