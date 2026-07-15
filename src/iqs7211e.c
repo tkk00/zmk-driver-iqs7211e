@@ -283,8 +283,11 @@ static void iqs7211e_inertia_work_handler(struct k_work *work) {
     hwheel_delta = data->inertia_hwheel_remainder_q8 / IQS7211E_Q8_ONE;
     data->inertia_hwheel_remainder_q8 -= hwheel_delta * IQS7211E_Q8_ONE;
 
+    // Emit both axes with a single sync so one inertia tick produces at most
+    // one HID report (two separately synced events doubled the BLE notify
+    // rate and could exhaust connection TX buffers).
     if (wheel_delta != 0) {
-        input_report_rel(dev, INPUT_REL_WHEEL, wheel_delta, true, K_FOREVER);
+        input_report_rel(dev, INPUT_REL_WHEEL, wheel_delta, hwheel_delta == 0, K_FOREVER);
     }
     if (hwheel_delta != 0) {
         input_report_rel(dev, INPUT_REL_HWHEEL, hwheel_delta, true, K_FOREVER);
@@ -349,8 +352,8 @@ static void iqs7211e_send_zoom(const struct device *dev, bool zoom_in) {
 }
 #endif
 
-static void iqs7211e_report_scroll(struct iqs7211e_data *data, uint16_t axis,
-                                   int16_t wheel_delta, int64_t current_time) {
+static void iqs7211e_report_scroll_sync(struct iqs7211e_data *data, uint16_t axis,
+                                        int16_t wheel_delta, int64_t current_time, bool sync) {
     // Clamp implausible per-frame deltas (coordinate jumps) so they can
     // neither flood the event pipeline nor seed a huge inertia velocity.
     if (wheel_delta > 40) {
@@ -362,7 +365,7 @@ static void iqs7211e_report_scroll(struct iqs7211e_data *data, uint16_t axis,
         return;
     }
 
-    input_report_rel(data->dev, axis, wheel_delta, true, K_FOREVER);
+    input_report_rel(data->dev, axis, wheel_delta, sync, K_FOREVER);
     data->scroll_was_active = true;
 
 #if defined(CONFIG_IQS7211E_SCROLLER_INERTIA) && CONFIG_IQS7211E_SCROLLER_INERTIA
@@ -392,12 +395,12 @@ static void iqs7211e_process_scroller_motion(struct iqs7211e_data *data,
     if (data->scroller_axis_lock == IQS7211E_SCROLL_AXIS_HORIZONTAL) {
         int16_t h_delta = iqs7211e_horizontal_scroll_delta(cfg, x_movement);
         if (h_delta != 0) {
-            iqs7211e_report_scroll(data, INPUT_REL_HWHEEL, h_delta, current_time);
+            iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, h_delta, current_time, true);
         }
     } else if (data->scroller_axis_lock == IQS7211E_SCROLL_AXIS_VERTICAL) {
         int16_t v_delta = iqs7211e_vertical_scroll_delta(cfg, y_movement);
         if (v_delta != 0) {
-            iqs7211e_report_scroll(data, INPUT_REL_WHEEL, v_delta, current_time);
+            iqs7211e_report_scroll_sync(data, INPUT_REL_WHEEL, v_delta, current_time, true);
         }
     }
 }
@@ -1008,11 +1011,15 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                     k_work_schedule(&data->click_work, K_MSEC(50));
                     data->nav_triggered = true;
                 }
-                iqs7211e_report_scroll(data, INPUT_REL_WHEEL, wheel_delta, current_time);
-                iqs7211e_report_scroll(data, INPUT_REL_HWHEEL, hwheel_delta, current_time);
+                iqs7211e_report_scroll_sync(data, INPUT_REL_WHEEL, wheel_delta, current_time,
+                                            hwheel_delta == 0);
+                iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, hwheel_delta, current_time,
+                                            true);
 #else
-                iqs7211e_report_scroll(data, INPUT_REL_WHEEL, -y_movement, current_time);
-                iqs7211e_report_scroll(data, INPUT_REL_HWHEEL, x_movement, current_time);
+                iqs7211e_report_scroll_sync(data, INPUT_REL_WHEEL, -y_movement, current_time,
+                                            x_movement == 0);
+                iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, x_movement, current_time,
+                                            true);
 #endif
 #if defined(CONFIG_IQS7211E_PINCH_ZOOM)
                 }
