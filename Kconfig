@@ -56,6 +56,18 @@ config IQS7211E_NAVIGATION_USE_Y_AXIS
       the user-horizontal direction corresponds to the sensor's raw Y
       axis. The remaining raw axis keeps scrolling vertically.
 
+config IQS7211E_NAVIGATION_DOMINANCE_PERCENT
+    int "Navigation dominance over scroll axis (percent)"
+    depends on IQS7211E_HORIZONTAL_NAVIGATION
+    range 0 1000
+    default 200
+    help
+      A swipe only fires navigation when the accumulated horizontal
+      movement exceeds the accumulated scroll-axis movement by this
+      ratio (200 = horizontal must be at least 2x the vertical).
+      Prevents slow horizontal drift during long vertical scrolling
+      from falsely triggering back/forward. Set 0 to disable the check.
+
 config IQS7211E_NAVIGATION_INVERT
     bool "Invert navigation swipe direction"
     depends on IQS7211E_HORIZONTAL_NAVIGATION
