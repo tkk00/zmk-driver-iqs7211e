@@ -75,35 +75,6 @@ config IQS7211E_TWO_FINGER_GRACE_MS
       suppressed. Larger values are more forgiving but delay the switch
       back to cursor movement after a real finger lift.
 
-config IQS7211E_PINCH_ZOOM
-    bool "Two-finger pinch zoom"
-    default n
-    help
-      Detect pinch (fingers moving apart or together) and emit zoom steps
-      as synthetic button events (BTN_FORWARD for zoom in, BTN_BACK for
-      zoom out). Map them to key presses with a
-      zmk,input-processor-behaviors node on the central's input listener,
-      e.g. Ctrl+KP_PLUS / Ctrl+KP_MINUS for browser zoom.
-
-config IQS7211E_PINCH_STEP
-    int "Pinch distance per zoom step"
-    depends on IQS7211E_PINCH_ZOOM
-    range 20 500
-    default 80
-    help
-      Inter-finger distance change (raw sensor units) required for one
-      zoom step. Smaller values zoom faster.
-
-config IQS7211E_GESTURE_DECIDE_THRESHOLD
-    int "Scroll vs pinch decision threshold"
-    depends on IQS7211E_PINCH_ZOOM
-    range 10 300
-    default 60
-    help
-      Accumulated evidence required to lock a two-finger gesture as either
-      scroll or pinch. Until decided, movement scrolls as usual. Smaller
-      values decide faster but may misclassify.
-
 config IQS7211E_SCROLLER_HWHEEL_ZONE_MIN_PERMILLE
     int "HWheel zone start (permille)"
     range 0 1000
