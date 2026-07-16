@@ -66,6 +66,7 @@ struct iqs7211e_data {
     bool tap_pending;   // waiting for a second touch to start a tap-to-drag
     bool drag_active;   // finger is down and holding a drag (button pressed)
     int32_t nav_accum;  // accumulated horizontal movement for navigation swipe
+    int32_t nav_scroll_accum; // accumulated scroll-axis movement (dominance check)
     bool nav_triggered; // navigation already fired during this two-finger touch
     int64_t two_finger_end_time; // when two-finger contact was last lost (grace)
     uint8_t tap_count;
@@ -874,6 +875,7 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 data->last_touch_time = current_time;
                 data->scroll_was_active = false;
                 data->nav_accum = 0;
+                data->nav_scroll_accum = 0;
                 data->nav_triggered = false;
                 data->gesture_started_near_edge = iqs7211e_is_near_edge(data, finger_1_x, finger_1_y) ||
                                                   iqs7211e_is_near_edge(data, finger_2_x, finger_2_y);
@@ -918,9 +920,17 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 nav_delta = -nav_delta;
 #endif
                 data->nav_accum += nav_delta;
+                data->nav_scroll_accum +=
+                    (wheel_delta != 0) ? abs(wheel_delta) : abs(hwheel_delta);
+
+                // Fire only when the horizontal evidence clearly dominates the
+                // scroll-axis evidence; slow horizontal drift during a long
+                // vertical scroll can then never build up to a false trigger.
+                int32_t nav_mag = (data->nav_accum < 0) ? -data->nav_accum : data->nav_accum;
                 if (!data->nav_triggered &&
-                    (data->nav_accum > CONFIG_IQS7211E_NAVIGATION_THRESHOLD ||
-                     data->nav_accum < -CONFIG_IQS7211E_NAVIGATION_THRESHOLD)) {
+                    nav_mag > CONFIG_IQS7211E_NAVIGATION_THRESHOLD &&
+                    nav_mag * 100 > data->nav_scroll_accum *
+                                        CONFIG_IQS7211E_NAVIGATION_DOMINANCE_PERCENT) {
                     iqs7211e_flush_pending_click(dev, data);
                     if (data->nav_accum > 0) {
                         LOG_DBG("Nav forward - press");
