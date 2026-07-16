@@ -68,11 +68,6 @@ struct iqs7211e_data {
     int32_t nav_accum;  // accumulated horizontal movement for navigation swipe
     bool nav_triggered; // navigation already fired during this two-finger touch
     int64_t two_finger_end_time; // when two-finger contact was last lost (grace)
-    uint16_t prev_finger_dist;   // previous inter-finger distance (pinch)
-    int32_t pinch_accum;         // accumulated distance change for zoom steps
-    int32_t decide_pinch;        // accumulated pinch evidence (gesture decision)
-    int32_t decide_move;         // accumulated scroll evidence (gesture decision)
-    uint8_t two_finger_mode;     // 0=undecided, 1=scroll, 2=pinch
     uint8_t tap_count;
     int16_t tap_start_x, tap_start_y;
     int16_t finger_2_prev_x, finger_2_prev_y;
@@ -331,24 +326,6 @@ static void iqs7211e_start_inertia_scroll(struct iqs7211e_data *data) {
     data->inertia_running = true;
     data->inertia_start_time = k_uptime_get();
     (void)k_work_schedule(&data->inertia_work, K_MSEC(IQS7211E_INERTIA_TICK_MS));
-}
-#endif
-
-#if defined(CONFIG_IQS7211E_PINCH_ZOOM)
-#ifndef INPUT_BTN_FORWARD
-#define INPUT_BTN_FORWARD 0x115
-#endif
-#ifndef INPUT_BTN_BACK
-#define INPUT_BTN_BACK 0x116
-#endif
-// Emit one zoom step as a synthetic button tap. These codes are not mapped
-// to HID mouse buttons by ZMK (only BTN_0..BTN_4 are); they are intended to
-// be caught by a zmk,input-processor-behaviors node on the listener and
-// converted to e.g. Ctrl+KP_PLUS / Ctrl+KP_MINUS.
-static void iqs7211e_send_zoom(const struct device *dev, bool zoom_in) {
-    uint16_t code = zoom_in ? INPUT_BTN_FORWARD : INPUT_BTN_BACK;
-    input_report_key(dev, code, 1, true, K_FOREVER);
-    input_report_key(dev, code, 0, true, K_FOREVER);
 }
 #endif
 
@@ -893,20 +870,11 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
             bool resumed = (current_time - data->two_finger_end_time) <
                            CONFIG_IQS7211E_TWO_FINGER_GRACE_MS;
 
-            // Always re-anchor the inter-finger distance to avoid a jump
-            data->prev_finger_dist =
-                (uint16_t)(abs((int32_t)finger_1_x - (int32_t)finger_2_x) +
-                           abs((int32_t)finger_1_y - (int32_t)finger_2_y));
-
             if (!resumed) {
                 data->last_touch_time = current_time;
                 data->scroll_was_active = false;
                 data->nav_accum = 0;
                 data->nav_triggered = false;
-                data->pinch_accum = 0;
-                data->decide_pinch = 0;
-                data->decide_move = 0;
-                data->two_finger_mode = 0;
                 data->gesture_started_near_edge = iqs7211e_is_near_edge(data, finger_1_x, finger_1_y) ||
                                                   iqs7211e_is_near_edge(data, finger_2_x, finger_2_y);
                 data->scroller_axis_lock = IQS7211E_SCROLL_AXIS_NONE;
@@ -932,51 +900,6 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 iqs7211e_process_scroller_motion(data, cfg, hwheel_zone, x_movement, y_movement,
                                                 current_time);
             } else {
-#if defined(CONFIG_IQS7211E_PINCH_ZOOM)
-                int32_t dist = abs((int32_t)finger_1_x - (int32_t)finger_2_x) +
-                               abs((int32_t)finger_1_y - (int32_t)finger_2_y);
-                int32_t dist_delta = dist - (int32_t)data->prev_finger_dist;
-                data->prev_finger_dist = (uint16_t)dist;
-
-                // The sensor can momentarily swap finger identities during a
-                // swipe, which makes the inter-finger distance jump wildly and
-                // falsely locks the gesture as a pinch (blocking navigation).
-                // Ignore implausibly large per-frame distance changes.
-                if (dist_delta > 150 || dist_delta < -150) {
-                    dist_delta = 0;
-                }
-
-                if (data->two_finger_mode == 0) {
-                    // Decide between scroll (fingers move together) and pinch
-                    // (fingers move apart/toward each other) by whichever
-                    // evidence accumulates faster.
-                    data->decide_pinch += (dist_delta < 0) ? -dist_delta : dist_delta;
-                    data->decide_move += abs(x_movement) + abs(y_movement);
-                    if (data->decide_pinch >= CONFIG_IQS7211E_GESTURE_DECIDE_THRESHOLD &&
-                        data->decide_pinch > data->decide_move) {
-                        data->two_finger_mode = 2;
-                        LOG_DBG("Two finger gesture: pinch");
-                    } else if (data->decide_move >= CONFIG_IQS7211E_GESTURE_DECIDE_THRESHOLD &&
-                               data->decide_move >= data->decide_pinch) {
-                        data->two_finger_mode = 1;
-                        LOG_DBG("Two finger gesture: scroll");
-                    }
-                }
-
-                if (data->two_finger_mode == 2) {
-                    // Pinch: convert accumulated inter-finger distance change
-                    // into discrete zoom steps; suppress scrolling.
-                    data->pinch_accum += dist_delta;
-                    while (data->pinch_accum >= CONFIG_IQS7211E_PINCH_STEP) {
-                        iqs7211e_send_zoom(dev, true);
-                        data->pinch_accum -= CONFIG_IQS7211E_PINCH_STEP;
-                    }
-                    while (data->pinch_accum <= -CONFIG_IQS7211E_PINCH_STEP) {
-                        iqs7211e_send_zoom(dev, false);
-                        data->pinch_accum += CONFIG_IQS7211E_PINCH_STEP;
-                    }
-                } else {
-#endif
 #if defined(CONFIG_IQS7211E_HORIZONTAL_NAVIGATION)
                 // Navigation mode: the user-horizontal axis triggers browser
                 // back/forward (mouse button 4/5); the other axis still scrolls.
@@ -1020,9 +943,6 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                                             x_movement == 0);
                 iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, x_movement, current_time,
                                             true);
-#endif
-#if defined(CONFIG_IQS7211E_PINCH_ZOOM)
-                }
 #endif
             }
         }
@@ -1070,8 +990,7 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 // release; otherwise it would fall through to the single
                 // finger tap check and misfire a left click.
                 if (touch_duration < 200 && !data->scroll_was_active &&
-                    !data->nav_triggered && data->two_finger_mode != 2 &&
-                    data->pending_click_type == 0) {
+                    !data->nav_triggered && data->pending_click_type == 0) {
                     iqs7211e_flush_pending_click(dev, data);
                     LOG_DBG("Two finger tap - press");
                     input_report_key(dev, INPUT_BTN_1, 1, true, K_FOREVER);
