@@ -8,7 +8,8 @@
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/drivers/i2c.h>
+#include <zephy
+r/drivers/i2c.h>
 #include <zephyr/input/input.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -77,6 +78,8 @@ struct iqs7211e_data {
     bool scroll_was_active;
     int32_t scroll_wheel_remainder;  // fractional wheel carry (smooth fine scroll)
     int32_t scroll_hwheel_remainder; // fractional hwheel carry
+    int32_t scroll_start_accum;      // movement accumulated before scroll starts
+    bool scroll_started;             // scroll threshold exceeded this touch
     uint16_t x_resolution;
     uint16_t y_resolution;
     bool resolution_valid;
@@ -907,6 +910,8 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 data->nav_triggered = false;
                 data->scroll_wheel_remainder = 0;
                 data->scroll_hwheel_remainder = 0;
+                data->scroll_start_accum = 0;
+                data->scroll_started = false;
                 data->gesture_started_near_edge = iqs7211e_is_near_edge(data, finger_1_x, finger_1_y) ||
                                                   iqs7211e_is_near_edge(data, finger_2_x, finger_2_y);
                 data->scroller_axis_lock = IQS7211E_SCROLL_AXIS_NONE;
@@ -936,11 +941,30 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
             int16_t y_movement = (finger_1_y + finger_2_y) / 2 - (data->previous_y + data->finger_2_prev_y) / 2;
             int16_t x_movement = (finger_1_x + finger_2_x) / 2 - (data->previous_x + data->finger_2_prev_x) / 2;
 
+            // Scroll start threshold: a two-finger TAP produces small, brief
+            // movement that must NOT scroll. Accumulate travel and only begin
+            // scrolling once it clearly exceeds a tap's worth of motion. Once
+            // started, it stays started until the fingers lift. Navigation
+            // still sees every frame (handled on its own accumulator below).
+            // Scroll start threshold: a two-finger TAP produces small, brief
+            // movement that must NOT scroll. Accumulate travel; only begin
+            // scrolling once it clearly exceeds a tap's worth of motion.
+            // Stays started until the fingers lift.
+            if (!data->scroll_started) {
+                data->scroll_start_accum += abs(x_movement) + abs(y_movement);
+                if (data->scroll_start_accum >= CONFIG_IQS7211E_SCROLL_START_THRESHOLD) {
+                    data->scroll_started = true;
+                }
+            }
+            bool emit_scroll = data->scroll_started;
+
             if (cfg->scroller_mode) {
                 uint16_t avg_y = (finger_1_y + finger_2_y) / 2;
                 bool hwheel_zone = iqs7211e_is_hwheel_zone(data, avg_y);
-                iqs7211e_process_scroller_motion(data, cfg, hwheel_zone, x_movement, y_movement,
-                                                current_time);
+                if (emit_scroll) {
+                    iqs7211e_process_scroller_motion(data, cfg, hwheel_zone, x_movement,
+                                                     y_movement, current_time);
+                }
             } else {
 #if defined(CONFIG_IQS7211E_HORIZONTAL_NAVIGATION)
                 // Navigation mode: the user-horizontal axis triggers browser
@@ -984,15 +1008,19 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                     k_work_schedule(&data->click_work, K_MSEC(50));
                     data->nav_triggered = true;
                 }
-                iqs7211e_report_scroll_sync(data, INPUT_REL_WHEEL, wheel_delta, current_time,
-                                            hwheel_delta == 0);
-                iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, hwheel_delta, current_time,
-                                            true);
+                if (emit_scroll) {
+                    iqs7211e_report_scroll_sync(data, INPUT_REL_WHEEL, wheel_delta, current_time,
+                                                hwheel_delta == 0);
+                    iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, hwheel_delta, current_time,
+                                                true);
+                }
 #else
-                iqs7211e_report_scroll_sync(data, INPUT_REL_WHEEL, -y_movement, current_time,
-                                            x_movement == 0);
-                iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, x_movement, current_time,
-                                            true);
+                if (emit_scroll) {
+                    iqs7211e_report_scroll_sync(data, INPUT_REL_WHEEL, -y_movement, current_time,
+                                                x_movement == 0);
+                    iqs7211e_report_scroll_sync(data, INPUT_REL_HWHEEL, x_movement, current_time,
+                                                true);
+                }
 #endif
             }
             } /* end: both fingers valid (non-transition frame) */
