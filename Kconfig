@@ -75,6 +75,17 @@ config IQS7211E_NAVIGATION_INVERT
     help
       Swap which swipe direction means back vs forward.
 
+config IQS7211E_SCROLL_START_THRESHOLD
+    int "Two-finger scroll start threshold (raw units)"
+    range 0 500
+    default 60
+    help
+      Accumulated two-finger travel required before scrolling begins. A
+      two-finger tap moves only slightly, so a nonzero threshold prevents
+      taps (and the tiny settle motion when the second finger lands) from
+      scrolling. Once exceeded, scrolling continues until the fingers lift.
+      Larger = taps are safer but a real scroll needs a bigger initial nudge.
+
 config IQS7211E_SCROLL_DIVISOR
     int "Two-finger scroll divisor (speed)"
     range 1 100
