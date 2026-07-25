@@ -75,6 +75,8 @@ struct iqs7211e_data {
     bool finger_2_prev_valid;
     uint8_t pending_click_type; // 0=none, 1=left, 2=right
     bool scroll_was_active;
+    int32_t scroll_wheel_remainder;  // fractional wheel carry (smooth fine scroll)
+    int32_t scroll_hwheel_remainder; // fractional hwheel carry
     uint16_t x_resolution;
     uint16_t y_resolution;
     bool resolution_valid;
@@ -331,23 +333,49 @@ static void iqs7211e_start_inertia_scroll(struct iqs7211e_data *data) {
 #endif
 
 static void iqs7211e_report_scroll_sync(struct iqs7211e_data *data, uint16_t axis,
-                                        int16_t wheel_delta, int64_t current_time, bool sync) {
-    // Clamp implausible per-frame deltas (coordinate jumps) so they can
-    // neither flood the event pipeline nor seed a huge inertia velocity.
-    if (wheel_delta > 40) {
-        wheel_delta = 40;
-    } else if (wheel_delta < -40) {
-        wheel_delta = -40;
-    }
-    if (wheel_delta == 0) {
-        return;
+                                        int16_t raw_delta, int64_t current_time, bool sync) {
+    // Deadzone: ignore single-unit jitter so a resting two-finger contact
+    // (sensor noise of +/-1) cannot creep the view or flip direction.
+    if (raw_delta > -CONFIG_IQS7211E_SCROLL_DEADZONE &&
+        raw_delta < CONFIG_IQS7211E_SCROLL_DEADZONE) {
+        raw_delta = 0;
     }
 
-    input_report_rel(data->dev, axis, wheel_delta, sync, K_FOREVER);
+    // Clamp implausible per-frame deltas (coordinate jumps) so they can
+    // neither flood the event pipeline nor seed a huge inertia velocity.
+    if (raw_delta > 200) {
+        raw_delta = 200;
+    } else if (raw_delta < -200) {
+        raw_delta = -200;
+    }
+
+    // Divide by the configured divisor but CARRY the remainder to the next
+    // frame instead of truncating it. Fine, slow movement then accumulates
+    // smoothly into 1-unit steps rather than being repeatedly rounded to 0
+    // (which caused stutter), and the sign can no longer flip from rounding.
+    int32_t *remainder = (axis == INPUT_REL_HWHEEL) ? &data->scroll_hwheel_remainder
+                                                    : &data->scroll_wheel_remainder;
+    if (raw_delta == 0) {
+        return;
+    }
+    int32_t acc = *remainder + raw_delta;
+    int32_t out = acc / CONFIG_IQS7211E_SCROLL_DIVISOR;
+    *remainder = acc - out * CONFIG_IQS7211E_SCROLL_DIVISOR;
+
+    if (out == 0) {
+        return;
+    }
+    if (out > 40) {
+        out = 40;
+    } else if (out < -40) {
+        out = -40;
+    }
+
+    input_report_rel(data->dev, axis, out, sync, K_FOREVER);
     data->scroll_was_active = true;
 
 #if defined(CONFIG_IQS7211E_SCROLLER_INERTIA) && CONFIG_IQS7211E_SCROLLER_INERTIA
-    iqs7211e_update_inertia_velocity(data, axis, wheel_delta, current_time);
+    iqs7211e_update_inertia_velocity(data, axis, out, current_time);
 #else
     ARG_UNUSED(axis);
     ARG_UNUSED(current_time);
@@ -877,6 +905,8 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 data->nav_accum = 0;
                 data->nav_scroll_accum = 0;
                 data->nav_triggered = false;
+                data->scroll_wheel_remainder = 0;
+                data->scroll_hwheel_remainder = 0;
                 data->gesture_started_near_edge = iqs7211e_is_near_edge(data, finger_1_x, finger_1_y) ||
                                                   iqs7211e_is_near_edge(data, finger_2_x, finger_2_y);
                 data->scroller_axis_lock = IQS7211E_SCROLL_AXIS_NONE;
@@ -892,7 +922,17 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                 input_report_key(dev, INPUT_BTN_0, 0, true, K_FOREVER);
             }
         } else {
-            // Two finger movement - scroll
+            // Two finger movement - scroll.
+            //
+            // Only compute movement when BOTH fingers were already valid on
+            // the previous frame. On the frame a second finger lands or lifts,
+            // the two-finger average jumps even though neither finger really
+            // moved, which otherwise emits a phantom scroll (place = up,
+            // release = down). On those transition frames we just record the
+            // positions below and skip scrolling entirely.
+            if (!data->previous_valid || !data->finger_2_prev_valid) {
+                // Transition frame: record positions, emit nothing.
+            } else {
             int16_t y_movement = (finger_1_y + finger_2_y) / 2 - (data->previous_y + data->finger_2_prev_y) / 2;
             int16_t x_movement = (finger_1_x + finger_2_x) / 2 - (data->previous_x + data->finger_2_prev_x) / 2;
 
@@ -955,6 +995,7 @@ static void iqs7211e_motion_work_handler(struct k_work *work) {
                                             true);
 #endif
             }
+            } /* end: both fingers valid (non-transition frame) */
         }
         
         data->previous_x = finger_1_x;
