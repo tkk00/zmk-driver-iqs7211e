@@ -75,6 +75,25 @@ config IQS7211E_NAVIGATION_INVERT
     help
       Swap which swipe direction means back vs forward.
 
+config IQS7211E_SCROLL_DIVISOR
+    int "Two-finger scroll divisor (speed)"
+    range 1 100
+    default 5
+    help
+      Raw sensor movement is divided by this to produce wheel steps, with
+      the remainder carried to the next frame for smooth fine scrolling.
+      Larger = slower scrolling. Replaces the old zip_scroll_scaler in the
+      ZMK input-processor chain (remove that scaler when using this).
+
+config IQS7211E_SCROLL_DEADZONE
+    int "Two-finger scroll deadzone (raw units)"
+    range 0 20
+    default 2
+    help
+      Per-frame raw movement at or below this magnitude is treated as zero.
+      Suppresses sensor jitter that would otherwise creep or flip direction
+      when two fingers rest on the pad. 0 disables the deadzone.
+
 config IQS7211E_TWO_FINGER_GRACE_MS
     int "Two-finger detection grace period (ms)"
     range 0 500
